@@ -1,0 +1,76 @@
+{% macro update_deleted_records(source_table_name, target_table_name, primary_keys_list_target, primary_keys_list_source = none) %}
+
+    {% if primary_keys_list_source is none %}
+        {% set primary_keys_list_source = primary_keys_list_target %}
+    {% endif %}
+
+    {# Build partition keys dynamically #}
+    {% set primary_keys = primary_keys_list_source | join(', ') %}
+    {% if execute %}
+        {% set current_batch_id = env_var('BATCH_ID','0') %}
+    {% else %}
+        {% set current_batch_id = None %}
+    {% endif %}
+    {% set src_cols = adapter.get_columns_in_relation(source_table_name) %}
+    {% set src_colnames = src_cols | map(attribute='name') | map('lower') | list %}
+    {# {% set src_ts_col = 'UPDATETIME' if 'updatetime' in src_colnames else 'ETL_UPDATE_DTTM' %} #}
+    {% set src_ts_col = 'ETL_UPDATE_DTTM' %}
+
+    {% set join_condition = [] %}
+    {% for i in range(primary_keys_list_target|length) %}
+    {% set t = primary_keys_list_target[i] %}
+    {% set s = primary_keys_list_source[i] %}
+    {# {% do join_condition.append('t' ~ '.' ~ t ~ '=' ~ 's' ~ '.' ~ s) %} #}
+    {% do join_condition.append('split_part(t.' ~ t ~ ",'_',1)" ~ '=' ~ 's' ~ '.' ~ s ~ '::string') %}
+    {% endfor %}
+
+
+  {% set update_query %}
+
+    update {{ target_table_name }} t
+    set t.current_record_ind = false ,
+    t.valid_to_dttm = s.SRC_UPD_TIME,
+    t.dbt_max_source_update_dttm = s.SRC_UPD_TIME,
+    t.dbt_update_dttm = s.SRC_UPD_TIME,
+    dbt_max_source_etl_update_dttm = s.ETL_UPDATE_DTTM,
+    t.etl_batch_id = {{current_batch_id}}
+
+    from  (select {{primary_keys}},ETL_UPDATE_DTTM,{{ src_ts_col }} as SRC_UPD_TIME
+           from  {{source_table_name}} where GW_DELETE_FLAG = 'Y' ) as s
+    where  t.valid_to_dttm = '9999-12-31' and
+    {{ join_condition | join(' AND ') }}
+
+
+  {% endset %}
+  {# {{ log(update_query, info=True) }} #}
+  {# {% do run_query(update_query) %} #}
+
+  {% set ctrl_db     = var('ctrl_db') %}
+  {% set ctrl_schema = var('ctrl_schema') %}
+  {% set audit_table_name = ctrl_db ~ '.' ~ ctrl_schema ~ '.' ~ 'CTL_DBT_LOG_BATCH_DTLS' %}
+  {% set short_table_name = target_table_name.identifier %}
+
+  {% call statement('soft_delete_upd', fetch_result=True) %}
+     {{ update_query }}
+  {% endcall %}
+
+  {% set res = load_result('soft_delete_upd') %}
+  {% if res is none %}
+     {% set rows = 0 %}
+  {% else %}
+  {% set rows = res['response']['rows_affected'] | default(0) %}
+  {% endif %}
+
+  {% set run_id     = env_var('DBT_RUN_ID','manual_run_' ~ run_started_at) %}
+
+  {% set log_qry %}
+     update {{ audit_table_name }}
+     set soft_delete_effected_rows = {{ rows }}
+     where invocation_id = '{{ invocation_id }}'
+     and table_name = '{{ short_table_name }}'
+     and batch_id = '{{current_batch_id}}'
+     and run_id = '{{ run_id }}'
+  {% endset %}
+  {% do run_query(log_qry) %}
+
+{% endmacro %}
