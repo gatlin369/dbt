@@ -1,0 +1,38 @@
+/*
+  ... (header above this line was cut off in the screenshot)
+  - Support time travel queries for Policy analysis
+
+Key Features:
+  - SHA-256 hash-based change detection
+  - Fetch only current records (current_record_ind = 'Y')
+  - Incremental processing using max_source_etl_update_dttm
+  - Automatic audit column population
+
+================================================================================
+*/
+{% set unique_key = ['dbt_merge_key', 'valid_from_dttm'] %}
+{% set partition_key = ['dbt_merge_key'] %}
+{% set sort_key = [('dbt_max_source_update_dttm','asc')] %}
+{% set surrogate_key = 'accountid_sk' %}
+
+{% set post_hook_macro_gw_flag = "{{ update_deleted_records( source('entity','lnd_pc_account'),this, ['gw_account_id'], ['id']) }}" %}
+{% set pre_hook_macro_log_ins = "{{ capture_log_at_start() }}" %}
+{% set post_hook_macro_log_upd = "{{ capture_log_at_end('SUCCESS') }}" %}
+
+{{
+  config(
+    database = var('slv_ent_db'),
+    schema = var('slv_ent_edw_schema'),
+    materialized='incremental',
+    incremental_strategy='merge_scd2',
+    unique_key = unique_key,
+    merge_update_columns = ['valid_to_dttm', 'current_record_ind', 'etl_batch_id', 'etl_update_dttm'],
+    on_schema_change='append_new_columns',
+    pre_hook = pre_hook_macro_log_ins,
+    post_hook = [post_hook_macro_log_upd, post_hook_macro_gw_flag]
+  )
+}}
+
+with entity_gw as (
+  {% if var('source_name') in ['entity_gw', 'all'] %}
+  -- ... (rest of the model was cut off in the screenshot)
