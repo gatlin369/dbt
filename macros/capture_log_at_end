@@ -1,0 +1,71 @@
+{% macro capture_log_at_end(
+    status='SUCCESS',
+    audit_table='AUDIT_DBT_LOG_BATCH_DTLS'
+) %}
+
+    {% set table_name =
+        this.identifier %}
+
+    {% set run_id =
+        env_var(
+            'DBT_RUN_ID',
+            'manual_run_' ~ run_started_at
+        ) %}
+
+    {% set batch_id =
+        env_var(
+            'BATCH_ID',
+            '0'
+        ) %}
+
+    {% set ctrl_db =
+        var('ctrl_db') %}
+
+    {% set ctrl_schema =
+        var('ctrl_schema') %}
+
+    {% set audit_table_name =
+        ctrl_db ~ '.'
+        ~ ctrl_schema
+        ~ '.'
+        ~ audit_table %}
+
+    {% call statement(
+        'audit_end',
+        fetch_result=False
+    ) %}
+
+        update {{ audit_table_name }}
+
+        set
+            end_time =
+                current_timestamp(),
+
+            status =
+                '{{ status }}',
+
+            duration_in_sec =
+                datediff(
+                    second,
+                    start_time,
+                    current_timestamp()
+                ),
+
+            audit_table_update_time =
+                current_timestamp()
+
+        where batch_id =
+            try_to_number('{{ batch_id }}')
+
+        and run_id =
+            '{{ run_id }}'
+
+        and table_name =
+            '{{ table_name }}'
+
+        and invocation_id =
+            '{{ invocation_id }}'
+
+    {% endcall %}
+
+{% endmacro %}
