@@ -1,0 +1,431 @@
+# ClaimCenter Claim SCD Type 2 Framework with Audit and Soft Delete Handling
+
+## Overview
+
+This framework implements historical tracking, soft delete processing, and audit logging for ClaimCenter claim data using dbt and Snowflake.
+
+The solution consists of:
+
+1. Incremental SCD Type 2 Model (`claim_inc.sql`)
+2. Generic SCD2 Processing Macro (`scd2_versioning.sql`)
+3. Audit Start Macro (`capture_log_at_start.sql`)
+4. Audit End Macro (`capture_log_at_end.sql`)
+5. Soft Delete Processing Macro (`update_deleted_records.sql`)
+6. Audit Control Table (`AUDIT_DBT_LOG_BATCH_DTLS`)
+
+---
+
+# Architecture
+
+```text
+CC_CLAIM (Source)
+         |
+         V
+    claim_inc.sql
+         |
+         V
+   scd2_versioning()
+         |
+         V
+    CLAIM_INC
+         |
+         +------ Historical Tracking
+         |
+         +------ Soft Delete Processing
+         |
+         +------ Audit Logging
+```
+
+---
+
+# Processing Flow
+
+## Step 1 - Pre Hook
+
+When the model starts execution:
+
+```sql
+capture_log_at_start()
+```
+
+A record is inserted into:
+
+```sql
+AUDIT_DBT_LOG_BATCH_DTLS
+```
+
+with:
+
+```text
+STATUS = RUNNING
+START_TIME = CURRENT_TIMESTAMP
+TABLE_NAME = CLAIM_INC
+RUN_ID = DBT Run ID
+```
+
+Example:
+
+| STATUS | TABLE_NAME |
+|----------|----------|
+| RUNNING | CLAIM_INC |
+
+---
+
+# Step 2 - Source Data Extraction
+
+The model reads data from:
+
+```sql
+CC_CLAIM
+CC_POLICY
+ClaimCenter Reference Tables
+```
+
+and prepares claim dimensional attributes.
+
+Business key:
+
+```sql
+claimid
+```
+
+Example:
+
+```text
+cc-cc_claim:12345
+```
+
+---
+
+# Step 3 - Hash Generation
+
+A hash value is generated:
+
+```sql
+HASH_VAL
+```
+
+using selected business attributes.
+
+Example:
+
+```sql
+sha2(concat_ws(...),256)
+```
+
+Purpose:
+
+Detect whether claim attributes changed.
+
+---
+
+# Step 4 - SCD Type 2 Change Detection
+
+The framework identifies:
+
+### New Claims
+
+Claims not present in target.
+
+### Changed Claims
+
+Claims whose HASH_VAL changed.
+
+### Unchanged Claims
+
+Ignored.
+
+---
+
+# Step 5 - Version Creation
+
+For each changed claim:
+
+Previous Version:
+
+```text
+CURRENT_RECORD_IND = FALSE
+VALID_TO_DTTM = Change Timestamp
+```
+
+New Version:
+
+```text
+CURRENT_RECORD_IND = TRUE
+VALID_TO_DTTM = 9999-12-31
+```
+
+Example:
+
+Claim 100
+
+Version 1
+
+```text
+VALID_FROM_DTTM = 2024-01-01
+VALID_TO_DTTM   = 2025-01-01
+CURRENT_RECORD_IND = FALSE
+```
+
+Version 2
+
+```text
+VALID_FROM_DTTM = 2025-01-01
+VALID_TO_DTTM   = 9999-12-31
+CURRENT_RECORD_IND = TRUE
+```
+
+---
+
+# Step 6 - Soft Delete Processing
+
+Guidewire does not physically remove claims.
+
+Instead:
+
+```sql
+GW_DELETE_FLAG = 'Y'
+```
+
+indicates deletion.
+
+After model execution the post hook runs:
+
+```sql
+update_deleted_records()
+```
+
+Logic:
+
+```sql
+select
+id,
+updatetime
+from cc_claim
+where gw_delete_flag='Y'
+```
+
+Matching claim records in:
+
+```sql
+CLAIM_INC
+```
+
+are updated.
+
+Before:
+
+```text
+CURRENT_RECORD_IND = TRUE
+VALID_TO_DTTM = 9999-12-31
+```
+
+After:
+
+```text
+CURRENT_RECORD_IND = FALSE
+VALID_TO_DTTM = Source UPDATETIME
+```
+
+Result:
+
+The claim becomes historical.
+
+No physical deletion occurs.
+
+History is preserved.
+
+---
+
+# Step 7 - Audit Metrics
+
+The framework captures:
+
+### Model Start Time
+
+```sql
+START_TIME
+```
+
+### Model End Time
+
+```sql
+END_TIME
+```
+
+### Status
+
+```sql
+SUCCESS
+FAILED
+RUNNING
+```
+
+### Duration
+
+```sql
+DURATION_IN_SEC
+```
+
+### Soft Delete Count
+
+```sql
+SOFT_DELETE_EFFECTED_ROWS
+```
+
+Example:
+
+| STATUS | SOFT_DELETE_EFFECTED_ROWS |
+|----------|----------|
+| SUCCESS | 4 |
+
+Meaning:
+
+4 SCD2 records were closed because source claims were marked deleted.
+
+---
+
+# Audit Table Structure
+
+Table:
+
+```sql
+AUDIT_DBT_LOG_BATCH_DTLS
+```
+
+Key columns:
+
+| Column | Purpose |
+|----------|----------|
+| BATCH_ID | Airflow Batch |
+| RUN_ID | dbt Run Identifier |
+| TABLE_NAME | Executed Model |
+| STATUS | RUNNING/SUCCESS/FAILED |
+| START_TIME | Execution Start |
+| END_TIME | Execution End |
+| DURATION_IN_SEC | Runtime |
+| SOFT_DELETE_EFFECTED_ROWS | Soft Delete Count |
+| INVOCATION_ID | dbt Invocation Identifier |
+
+---
+
+# Example Test Scenario
+
+Source Record
+
+```sql
+ID = 5
+GW_DELETE_FLAG = N
+```
+
+Target Record
+
+```text
+CLAIMID = cc-cc_claim:5
+CURRENT_RECORD_IND = TRUE
+VALID_TO_DTTM = 9999-12-31
+```
+
+Delete Simulation
+
+```sql
+update CC_CLAIM
+set
+GW_DELETE_FLAG='Y',
+UPDATETIME=current_timestamp()
+where ID=5;
+```
+
+Run:
+
+```bash
+dbt run -s claim_inc
+```
+
+Result
+
+Target Table:
+
+```text
+CLAIMID = cc-cc_claim:5
+CURRENT_RECORD_IND = FALSE
+VALID_TO_DTTM = Source UPDATETIME
+```
+
+Audit Table:
+
+```text
+STATUS = SUCCESS
+SOFT_DELETE_EFFECTED_ROWS = 1
+```
+
+---
+
+# Business Benefits
+
+## Complete Historical Tracking
+
+Every claim change is retained.
+
+No loss of historical information.
+
+---
+
+## Regulatory Compliance
+
+Supports auditability and historical reconstruction.
+
+---
+
+## Data Lineage
+
+Start time, end time, status and batch information captured for each execution.
+
+---
+
+## Soft Delete Handling
+
+Deleted ClaimCenter records are automatically closed in the warehouse.
+
+No manual intervention required.
+
+---
+
+## Reusable Framework
+
+The same pattern can be reused for:
+
+```text
+Claim
+Exposure
+Contact
+Policy
+Activity
+Matter
+Reserve
+Transaction
+```
+
+and any other Guidewire entity requiring SCD Type 2 history management.
+
+---
+
+# Final Outcome
+
+The framework provides:
+
+✓ Incremental Loading
+
+✓ SCD Type 2 History Tracking
+
+✓ Soft Delete Processing
+
+✓ Audit Logging
+
+✓ Batch Traceability
+
+✓ Operational Monitoring
+
+✓ Guidewire ClaimCenter Alignment
+
+✓ Snowflake + dbt Native Implementation
