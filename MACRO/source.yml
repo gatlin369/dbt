@@ -1,0 +1,51 @@
+version: 2
+
+sources:
+
+  - name: mrg_cc
+    description: "Guidewire ClaimCenter merged tables"
+    database: "{{ var('mrg_cc_database') }}"
+    schema: "{{ var('mrg_cc_schema') }}"
+    tables:
+      - name: cc_claim
+      - name: cc_policy
+      - name: cctl_losscause
+      - name: cctl_losstype
+      - name: cctl_claimsource
+      - name: cctl_claimtier
+      - name: cctl_accidenttype
+      - name: cctl_claimreopenedreason
+      - name: cctl_weathertype
+      - name: cctl_reinsuranceflaggedstatus
+      - name: cctl_claimprogresstype
+      - name: cctl_claimstate
+      - name: cctl_claimsegment
+      - name: cctl_claimstrategy
+      - name: cctl_faultrating
+      - name: cctl_largelossnotificationstat
+      - name: cctl_assignmentstatus
+      - name: cctl_isostatus
+      - name: cctl_salvagestatus
+      - name: cctl_storagetype
+      - name: cctl_storagecategory
+      - name: cctl_claimclosedoutcometype
+      - name: cctl_litigationstatus
+      - name: cctl_siustatus
+      - name: cctl_lobcode
+      - name: cctl_personrelationtype
+      - name: cctl_howreportedtype
+      - name: cctl_yesno
+      - name: cctl_flaggedtype
+
+
+      # vehicle
+      - name: cc_vehicle
+      - name: cctl_jurisdiction
+      - name: cctl_vehiclestyle
+      - name: cctl_offroadvehiclestyle
+      - name: cctl_vehiclemanufacturer
+
+      # note
+      - name: cc_note
+      - name: cctl_notesecuritytype
+      - name: cctl_notetopictype
