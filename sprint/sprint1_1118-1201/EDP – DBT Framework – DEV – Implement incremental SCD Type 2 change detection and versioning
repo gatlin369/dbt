@@ -1,0 +1,5 @@
+Changes to configured tracked attributes are detected, and the current record is expired (end-dated and its current flag turned off) when a tracked attribute changes.
+Unchanged records are not updated or duplicated — no new version is created when the tracked attributes are identical.
+Previously expired historical versions remain unchanged.
+Exactly one current record exists for each active business key after successful processing.
+Reprocessing the same input is idempotent — running it again does not create duplicate historical versions.
