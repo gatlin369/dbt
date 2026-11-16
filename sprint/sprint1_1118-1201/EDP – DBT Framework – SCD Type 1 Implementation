@@ -1,0 +1,12 @@
+Description -
+Implement an SCD Type 1 load in the dbt framework so that each record always holds its latest values, with no history kept. Reuse the existing framework approach and apply it to at least one table.
+
+
+
+Acceptance criteria
+
+Each business key keeps only one record, holding the latest values.
+New records are added, and changed records are updated in place.
+Unchanged records are not updated or duplicated.
+Re-running the same data does not create duplicates.
+The SCD Type 1 logic is reusable and works on at least one table.
