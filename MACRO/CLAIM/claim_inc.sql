@@ -4,7 +4,7 @@
 
 {% set post_hook_macro_gw_flag %}
 {{ update_deleted_records(
-    source('mrg_cc','cc_claim'),
+    source('mrg_cc', 'cc_claim'),
     this,
     ['claimid'],
     ['id']
@@ -15,10 +15,12 @@
 {{ capture_log_at_end('SUCCESS') }}
 {% endset %}
 
+
 {{ config(
     materialized='incremental',
     incremental_strategy='merge',
-    unique_key=['claimid','valid_from_dttm'],
+    unique_key=['claimid', 'valid_from_dttm'],
+    full_refresh=false,
 
     pre_hook=[
         pre_hook_macro_log_ins
@@ -96,7 +98,12 @@ with cte_source as (
         cc.computersecurity as computersecurityind,
         cc.safetyequipused as safetyequipusedind,
         cc.employmentinjury as employmentinjuryind,
-        iff(yn.name = 'Yes', true, false) as medicalfirstinfoind,
+
+        iff(
+            yn.name = 'Yes',
+            true,
+            false
+        ) as medicalfirstinfoind,
 
         cc.hospitaldays,
 
@@ -159,34 +166,51 @@ with cte_source as (
         ls.name as litigationstatus,
         sius.name as siustatus,
 
-        'pc-'||'pc_policyperiod'||':'||cplc.policysystemperiodid::varchar(256) as policysystemperiodid,
+        'pc-'||'pc_policyperiod'||':'||
+            cplc.policysystemperiodid::varchar(256)
+            as policysystemperiodid,
 
-        'cc-'||'cc_address'||':'||cc.losslocationid::varchar(256) as losslocationid,
+        'cc-'||'cc_address'||':'||
+            cc.losslocationid::varchar(256)
+            as losslocationid,
 
-        'cc-'||'cc_contact'||':'||cc.insureddenormid::varchar(256) as insureddenormid,
+        'cc-'||'cc_contact'||':'||
+            cc.insureddenormid::varchar(256)
+            as insureddenormid,
 
-        'cc-'||'cc_user'||':'||cc.createuserid::varchar(256) as createuserid,
-        'cc-'||'cc_user'||':'||cc.updateuserid::varchar(256) as updateuserid,
+        'cc-'||'cc_user'||':'||
+            cc.createuserid::varchar(256)
+            as createuserid,
+
+        'cc-'||'cc_user'||':'||
+            cc.updateuserid::varchar(256)
+            as updateuserid,
 
         cc.publicid,
 
         'GWCC' as sourcesystem,
 
         cast(
-            nvl(cc.beanversion,0) ||
-            nvl(cplc.beanversion,0)
+            nvl(cc.beanversion, 0) ||
+            nvl(cplc.beanversion, 0)
             as varchar(256)
         ) as beanversion,
 
         cc.createtime,
 
         coalesce(
-            array_max([cc.updatetime,cplc.updatetime]),
+            array_max([
+                cc.updatetime,
+                cplc.updatetime
+            ]),
             '1900-01-01'
         )::timestamp_ntz as updatetime,
 
         coalesce(
-            array_max([cc.row_insert_tms,cplc.row_insert_tms]),
+            array_max([
+                cc.row_insert_tms,
+                cplc.row_insert_tms
+            ]),
             '1900-01-01'
         )::timestamp_ntz as row_insert_tms
 
@@ -282,6 +306,48 @@ with cte_source as (
     left join {{ source('mrg_cc', 'cctl_flaggedtype') }} flt
         on cc.flagged = flt.id
 
+
+    /* ===============================================================
+       Deleted Guidewire claims are not processed as normal SCD2 rows.
+
+       update_deleted_records() handles them in the post-hook instead.
+       =============================================================== */
+
+    where coalesce(cc.gw_delete_flag, 'N') <> 'Y'
+
+
+    /* ===============================================================
+       Apply the watermark only when this is an incremental execution.
+
+       The 3-day lookback deliberately rereads recent records to handle
+       late arriving / delayed source changes.
+       =============================================================== */
+
+    {% if is_incremental() %}
+
+        and coalesce(
+                array_max([
+                    cc.updatetime,
+                    cplc.updatetime
+                ]),
+                '1900-01-01'
+            )::timestamp_ntz
+            >
+            (
+                select
+                    dateadd(
+                        day,
+                        -3,
+                        coalesce(
+                            max(dbt_max_source_update_dttm),
+                            '1900-01-01'::timestamp_ntz
+                        )
+                    )
+                from {{ this }}
+            )
+
+    {% endif %}
+
 ),
 
 
@@ -289,34 +355,36 @@ cte_hashed as (
 
     select
         *,
+
         updatetime as dbt_max_source_update_dttm,
 
         sha2(
-    concat_ws(
-        '||',
+            concat_ws(
+                '||',
 
-        nvl(to_varchar(policyid), ''),
-        nvl(to_varchar(claimnum), ''),
-        nvl(to_varchar(losscause), ''),
-        nvl(to_varchar(losstype), ''),
-        nvl(to_varchar(losslocationcd), ''),
-        nvl(to_varchar(lossdesc), ''),
-        nvl(to_varchar(claimsource), ''),
-        nvl(to_varchar(claimtier), ''),
-        nvl(to_varchar(accidenttype), ''),
-        nvl(to_varchar(progress), ''),
-        nvl(to_varchar(reinsuranceflaggedstatus), ''),
-        nvl(to_varchar(weather), ''),
-        nvl(to_varchar(flaggedreasondesc), ''),
-        nvl(to_varchar(fault), ''),
-        nvl(to_varchar(publicid), '')
-    ),
-    256
-) as hash_val
+                nvl(to_varchar(policyid), ''),
+                nvl(to_varchar(claimnum), ''),
+                nvl(to_varchar(losscause), ''),
+                nvl(to_varchar(losstype), ''),
+                nvl(to_varchar(losslocationcd), ''),
+                nvl(to_varchar(lossdesc), ''),
+                nvl(to_varchar(claimsource), ''),
+                nvl(to_varchar(claimtier), ''),
+                nvl(to_varchar(accidenttype), ''),
+                nvl(to_varchar(progress), ''),
+                nvl(to_varchar(reinsuranceflaggedstatus), ''),
+                nvl(to_varchar(weather), ''),
+                nvl(to_varchar(flaggedreasondesc), ''),
+                nvl(to_varchar(fault), ''),
+                nvl(to_varchar(publicid), '')
+            ),
+            256
+        ) as hash_val
 
     from cte_source
 
 )
+
 
 {{ scd2_versioning(
     partition_key=['claimid'],
