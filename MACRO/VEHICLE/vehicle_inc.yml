@@ -1,0 +1,48 @@
+version: 2
+
+models:
+
+  - name: VEHICLE_inc
+    description: "SCD Type 2 history of Guidewire ClaimCenter vehicles (one row per vehicle version)."
+
+    data_tests:
+      - scd2_one_current_row_per_key:
+          arguments:
+            key_columns: ['vehicleid']
+      - scd2_unique_versions:
+          arguments:
+            key_columns: ['vehicleid']
+      - scd2_valid_date_range
+
+    columns:
+      - name: vehicleid
+        description: "Business key: 'cc-cc_vehicle:' || cc_vehicle.id"
+        data_tests:
+          - not_null
+
+      - name: publicid
+        description: "Guidewire public ID; unique among current versions."
+        data_tests:
+          - unique:
+              config:
+                where: "current_record_ind"
+
+      - name: hash_val
+        description: "SHA-256 hash of tracked attributes; a change creates a new version."
+        data_tests:
+          - not_null
+
+      - name: valid_from_dttm
+        description: "Start of the version's validity window (inclusive)."
+        data_tests:
+          - not_null
+
+      - name: valid_to_dttm
+        description: "End of the version's validity window (exclusive); 9999-12-31 for the current version."
+        data_tests:
+          - not_null
+
+      - name: current_record_ind
+        description: "True for the current version of each vehicle."
+        data_tests:
+          - not_null

@@ -1,0 +1,51 @@
+version: 2
+
+models:
+
+  - name: Note_inc
+    description: "SCD Type 2 history of Guidewire ClaimCenter notes (one row per note version)."
+
+    data_tests:
+      - scd2_one_current_row_per_key:
+          arguments:
+            key_columns: ['noteid']
+      - scd2_unique_versions:
+          arguments:
+            key_columns: ['noteid']
+      - scd2_valid_date_range
+
+    columns:
+      - name: noteid
+        description: "Business key: 'cc-cc_note:' || cc_note.id"
+        data_tests:
+          - not_null
+
+      - name: claimid
+        description: "Claim the note belongs to; joins to claim_inc.claimid."
+
+      - name: publicid
+        description: "Guidewire public ID; unique among current versions."
+        data_tests:
+          - unique:
+              config:
+                where: "current_record_ind"
+
+      - name: hash_val
+        description: "SHA-256 hash of tracked attributes; a change creates a new version."
+        data_tests:
+          - not_null
+
+      - name: valid_from_dttm
+        description: "Start of the version's validity window (inclusive)."
+        data_tests:
+          - not_null
+
+      - name: valid_to_dttm
+        description: "End of the version's validity window (exclusive); 9999-12-31 for the current version."
+        data_tests:
+          - not_null
+
+      - name: current_record_ind
+        description: "True for the current version of each note."
+        data_tests:
+          - not_null
