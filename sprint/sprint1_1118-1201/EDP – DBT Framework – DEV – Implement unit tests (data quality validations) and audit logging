@@ -1,0 +1,5 @@
+Data quality tests verify SCD Type 2 integrity per business key: exactly one current record per key, no duplicate versions, and valid from/to date ranges; key columns are not null.
+The framework fails (or flags, per configured severity) the execution when critical data quality rules are violated.
+Every model execution is recorded in the audit table with start time, end time, status (RUNNING / SUCCESS / FAILED / SKIPPED) and duration, plus batch and run identifiers.
+Failed or skipped executions are diagnosable through dbt logs and audit records (status and error message captured).
+Data quality tests are generic and reusable across multiple SCD Type 2 models.
